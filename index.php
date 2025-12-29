@@ -1,167 +1,254 @@
 <?php
-// Handle file upload
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['files'])) {
-    $uploadDate = date('Y-m-d');
-    $uploadDir = __DIR__ . "/uploads/" . $uploadDate;
+$baseDir = __DIR__ . "/uploads";
+if (!is_dir($baseDir)) mkdir($baseDir, 0777, true);
 
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0777, true);
-    }
+/* ================= UPLOAD ================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['files'])) {
+    $today = date('Y-m-d');
+    $dir = "$baseDir/$today";
+    if (!is_dir($dir)) mkdir($dir, 0777, true);
 
-    foreach ($_FILES['files']['tmp_name'] as $index => $tmpName) {
-        if ($_FILES['files']['error'][$index] === UPLOAD_ERR_OK) {
-            $fileName = basename($_FILES['files']['name'][$index]);
-            move_uploaded_file($tmpName, $uploadDir . "/" . $fileName);
+    foreach ($_FILES['files']['tmp_name'] as $i => $tmp) {
+        if ($_FILES['files']['error'][$i] === 0) {
+            move_uploaded_file($tmp, "$dir/" . basename($_FILES['files']['name'][$i]));
         }
     }
-    echo json_encode(["status" => "success"]);
+    echo json_encode(["status" => "ok"]);
     exit;
+}
+
+/* ================= DELETE ================= */
+if (isset($_POST['delete'])) {
+    $file = realpath($baseDir . "/" . $_POST['delete']);
+    if ($file && strpos($file, realpath($baseDir)) === 0 && file_exists($file)) {
+        unlink($file);
+    }
+    exit;
+}
+
+/* ================= RENAME ================= */
+if (isset($_POST['rename_old'], $_POST['rename_new'])) {
+    $old = realpath($baseDir . "/" . $_POST['rename_old']);
+    if ($old && strpos($old, realpath($baseDir)) === 0) {
+        $new = dirname($old) . "/" . basename($_POST['rename_new']);
+        rename($old, $new);
+    }
+    exit;
+}
+
+/* ================= DATA ================= */
+$folders = array_filter(glob("$baseDir/*"), 'is_dir');
+rsort($folders); // newest first
+
+$active = $_GET['folder'] ?? null;
+$files = [];
+
+if ($active && is_dir("$baseDir/$active")) {
+    $files = array_diff(scandir("$baseDir/$active"), ['.', '..']);
 }
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html>
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Modern File Uploader</title>
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        background: #f4f6f8;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-    }
-    .upload-container {
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        padding: 20px;
-        max-width: 500px;
-        width: 100%;
-        text-align: center;
-    }
-    h2 {
-        margin-bottom: 10px;
-    }
-    .drop-zone {
-        border: 2px dashed #4a90e2;
-        padding: 30px;
-        border-radius: 10px;
-        background: #f9fbfd;
-        cursor: pointer;
-        transition: 0.3s;
-    }
-    .drop-zone.dragover {
-        background: #e0f0ff;
-        border-color: #007bff;
-    }
-    input[type="file"] {
-        display: none;
-    }
-    .file-list {
-        margin-top: 15px;
-        text-align: left;
-    }
-    .file-list div {
-        font-size: 14px;
-        margin: 5px 0;
-        background: #f1f1f1;
-        padding: 6px;
-        border-radius: 5px;
-    }
-    button {
-        margin-top: 15px;
-        padding: 10px 15px;
-        background: #4a90e2;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-    }
-    button:hover {
-        background: #357abd;
-    }
-    @media (max-width: 600px) {
-        .upload-container {
-            padding: 15px;
-        }
-        .drop-zone {
+    <meta charset="UTF-8">
+    <title>File Manager</title>
+
+    <style>
+        body {
+            background: #0b1220;
+            color: #e5e7eb;
+            font-family: Inter, system-ui;
             padding: 20px;
         }
-    }
-</style>
+
+        .upload {
+            border: 2px dashed #3b82f6;
+            padding: 22px;
+            text-align: center;
+            border-radius: 14px;
+            cursor: pointer;
+        }
+
+        .folder-grid,
+        .file-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 16px;
+            margin-top: 22px;
+        }
+
+        .folder,
+        .file {
+            background: #111827;
+            padding: 14px;
+            border-radius: 12px;
+            transition: .2s;
+        }
+
+        .folder:hover,
+        .file:hover {
+            background: #1f2937;
+        }
+
+        .file img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+        }
+
+        .file-name {
+            font-size: 13px;
+            margin-top: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        button {
+            font-size: 12px;
+            padding: 5px 8px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .btn-blue {
+            background: #2563eb;
+            color: white;
+        }
+
+        .btn-red {
+            background: #dc2626;
+            color: white;
+        }
+
+        .search {
+            margin-top: 18px;
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: none;
+        }
+    </style>
 </head>
+
 <body>
 
-<div class="upload-container">
-    <h2>Upload Files</h2>
-    <div class="drop-zone" id="dropZone">Drag & Drop files here or click to select</div>
-    <input type="file" id="fileInput" name="files[]" multiple>
-    <div class="file-list" id="fileList"></div>
-    <button id="uploadBtn">Upload</button>
-</div>
+    <h2>📁 File Manager</h2>
 
-<script>
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-const fileList = document.getElementById('fileList');
-const uploadBtn = document.getElementById('uploadBtn');
-let filesToUpload = [];
+    <div class="upload" onclick="document.getElementById('file').click()">
+        Click or Drop Files to Upload
+        <input type="file" id="file" hidden multiple>
+    </div>
 
-dropZone.addEventListener('click', () => fileInput.click());
+    <?php if ($active): ?>
+        <input type="text" id="search" class="search" placeholder="Search files...">
+    <?php endif; ?>
 
-fileInput.addEventListener('change', (e) => {
-    filesToUpload = [...filesToUpload, ...e.target.files];
-    displayFiles();
-});
+    <?php if (!$active): ?>
+        <div class="folder-grid">
+            <?php foreach ($folders as $f): ?>
+                <div class="folder" onclick="location.href='?folder=<?= basename($f) ?>'">
+                    📁 <?= basename($f) ?>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php else: ?>
+        <button onclick="location.href='index.php'">⬅ Back</button>
 
-dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('dragover');
-});
-dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('dragover');
-});
-dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    filesToUpload = [...filesToUpload, ...e.dataTransfer.files];
-    displayFiles();
-});
+        <div class="file-grid" id="fileGrid">
+            <?php foreach ($files as $f): ?>
+                <div class="file" data-name="<?= strtolower($f) ?>">
+                    <?php if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $f)): ?>
+                        <img src="uploads/<?= $active ?>/<?= $f ?>">
+                    <?php else: ?>
+                        📄
+                    <?php endif; ?>
+                    <div class="file-name"><?= htmlspecialchars($f) ?></div>
+                    <div class="actions">
+                        <button class="btn-blue" onclick="renameFile('<?= $active ?>/<?= $f ?>','<?= $f ?>')">Rename</button>
+                        <button class="btn-red" onclick="deleteFile('<?= $active ?>/<?= $f ?>')">Delete</button>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
 
-function displayFiles() {
-    fileList.innerHTML = '';
-    filesToUpload.forEach(file => {
-        const div = document.createElement('div');
-        div.textContent = file.name;
-        fileList.appendChild(div);
-    });
-}
+    <!-- Rename Modal -->
+    <div id="renameModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);align-items:center;justify-content:center;">
+        <div style="background:#0f172a;padding:20px;border-radius:10px;width:300px;">
+            <h3>Rename File</h3>
+            <input id="newName" style="width:100%;padding:8px">
+            <br><br>
+            <button class="btn-blue" onclick="confirmRename()">Save</button>
+            <button onclick="closeRename()">Cancel</button>
+        </div>
+    </div>
 
-uploadBtn.addEventListener('click', () => {
-    if (filesToUpload.length === 0) {
-        alert("Please select files first.");
-        return;
-    }
-    let formData = new FormData();
-    filesToUpload.forEach(file => formData.append('files[]', file));
+    <script>
+        const input = document.getElementById("file");
+        let renamePath = "";
 
-    fetch('', {
-        method: 'POST',
-        body: formData
-    }).then(res => res.json()).then(data => {
-        if (data.status === 'success') {
-            alert('Files uploaded successfully!');
-            filesToUpload = [];
-            fileList.innerHTML = '';
+        input.onchange = () => {
+            const fd = new FormData();
+            [...input.files].forEach(f => fd.append("files[]", f));
+            fetch("", {
+                method: "POST",
+                body: fd
+            }).then(() => location.reload());
+        };
+
+        function deleteFile(path) {
+            if (!confirm("Delete this file?")) return;
+            fetch("", {
+                method: "POST",
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: "delete=" + encodeURIComponent(path)
+            }).then(() => location.reload());
         }
-    }).catch(err => console.error(err));
-});
-</script>
+
+        function renameFile(path, name) {
+            renamePath = path;
+            document.getElementById("newName").value = name;
+            document.getElementById("renameModal").style.display = "flex";
+        }
+
+        function confirmRename() {
+            fetch("", {
+                method: "POST",
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: "rename_old=" + encodeURIComponent(renamePath) + "&rename_new=" + encodeURIComponent(document.getElementById("newName").value)
+            }).then(() => location.reload());
+        }
+
+        function closeRename() {
+            document.getElementById("renameModal").style.display = "none";
+        }
+
+        /* ===== FIXED SEARCH ===== */
+        const search = document.getElementById("search");
+        if (search) {
+            search.addEventListener("input", () => {
+                const q = search.value.toLowerCase();
+                document.querySelectorAll(".file").forEach(f => {
+                    f.style.display = f.dataset.name.includes(q) ? "" : "none";
+                });
+            });
+        }
+    </script>
 
 </body>
+
 </html>
