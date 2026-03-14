@@ -127,8 +127,8 @@ foreach ($folders as $f) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ProVault — File Manager</title>
-    <meta name="description" content="ProVault is a premium file manager with drag & drop upload, preview, rename, download and delete functionality.">
+    <title>Local FileManager</title>
+    <meta name="description" content="Local FileManager is a premium file manager with drag & drop upload, preview, rename, download and delete functionality.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -912,8 +912,8 @@ foreach ($folders as $f) {
         <div class="logo">
             <div class="logo-icon">🗂</div>
             <div>
-                <h1>ProVault</h1>
-                <span>File Manager Pro</span>
+                <h1>Local FileManager</h1>
+                <span>Professional Tool</span>
             </div>
         </div>
         <div class="header-stats">
