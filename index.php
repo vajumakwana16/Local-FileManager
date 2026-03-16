@@ -121,6 +121,17 @@ foreach ($folders as $f) {
     $count = count(array_diff(scandir($f), ['.', '..']));
     $folderData[] = ['name' => $name, 'count' => $count];
 }
+
+/* ================= MOBILE URL DETECTION ================= */
+$host = $_SERVER['HTTP_HOST'];
+if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+    $localIP = gethostbyname(gethostname());
+    if ($localIP !== '127.0.0.1' && filter_var($localIP, FILTER_VALIDATE_IP)) {
+        $host = str_replace(['localhost', '127.0.0.1'], $localIP, $host);
+    }
+}
+$protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? "https" : "http";
+$mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -245,6 +256,34 @@ foreach ($folders as $f) {
         .stat-lbl {
             font-size: 11px; color: var(--text3);
             text-transform: uppercase; letter-spacing: .5px;
+        }
+
+        .scanner-btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 9px 18px;
+            background: rgba(59,130,246,.12);
+            border: 1px solid var(--border2);
+            color: var(--accent);
+            font-size: 13px; font-weight: 600;
+            border-radius: 50px; cursor: pointer;
+            transition: all .2s;
+            backdrop-filter: blur(10px);
+        }
+
+        .scanner-btn:hover {
+            background: var(--accent);
+            color: #fff;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px var(--glow);
+        }
+
+        .qr-wrap {
+            background: #fff;
+            padding: 20px;
+            border-radius: 16px;
+            display: inline-block;
+            margin: 20px 0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
 
         /* ── Main ── */
@@ -917,6 +956,9 @@ foreach ($folders as $f) {
             </div>
         </div>
         <div class="header-stats">
+            <button class="scanner-btn" onclick="showScanner()">
+                <span>📱 Connect Phone</span>
+            </button>
             <div class="stat">
                 <div class="stat-val" id="totalFolders"><?= count($folderData) ?></div>
                 <div class="stat-lbl">Folders</div>
@@ -1057,6 +1099,24 @@ foreach ($folders as $f) {
         <div class="modal-btns" style="margin-top:16px">
             <button class="modal-btn modal-btn-cancel" onclick="closeModal('previewModal')">Close</button>
             <button class="modal-btn modal-btn-primary" id="previewDlBtn">↓ Download</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Scanner Modal ── -->
+<div class="modal-overlay" id="scannerModal">
+    <div class="modal" style="text-align:center">
+        <div class="modal-header" style="justify-content:center">
+            <div class="modal-header-icon preview">📱</div>
+            <div class="modal-title">Connect Mobile</div>
+        </div>
+        <p style="color:var(--text2);font-size:14px;margin-bottom:10px">Scan this QR code with your phone to open Local FileManager instantly.</p>
+        <div class="qr-wrap">
+            <img id="qrImage" src="" alt="QR Code" style="width:200px;height:200px;display:block">
+        </div>
+        <p style="color:var(--text3);font-size:11px">Make sure both devices are on the same Wi-Fi network.</p>
+        <div class="modal-btns">
+            <button class="modal-btn modal-btn-cancel" onclick="closeModal('scannerModal')">Close</button>
         </div>
     </div>
 </div>
@@ -1451,6 +1511,13 @@ function escHtml(str) {
 /* ========================================================
    MODAL HELPERS
 ======================================================== */
+function showScanner() {
+    const url = "<?= $mobileScannerUrl ?>";
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
+    document.getElementById('qrImage').src = qrUrl;
+    openModal('scannerModal');
+}
+
 function openModal(id) {
     document.getElementById(id).classList.add('open');
 }
