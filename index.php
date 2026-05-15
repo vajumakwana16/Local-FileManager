@@ -77,19 +77,56 @@ if (isset($_POST['rename_old'], $_POST['rename_new'])) {
     exit;
 }
 
+/* ================= SAVE FILE (CREATE/EDIT) ================= */
+if (isset($_POST['save_file'], $_POST['file_content'])) {
+    $relPath = ltrim($_POST['save_file'], '/\\');
+    if (strpos($relPath, '..') !== false) {
+        header('Content-Type: application/json');
+        echo json_encode(["status" => "error", "msg" => "Invalid path"]);
+        exit;
+    }
+    $file = $baseDir . '/' . $relPath;
+    $dir = dirname($file);
+    if (!is_dir($dir)) mkdir($dir, 0777, true);
+    
+    if (file_put_contents($file, $_POST['file_content']) !== false) {
+        header('Content-Type: application/json');
+        echo json_encode(["status" => "ok"]);
+    } else {
+        header('Content-Type: application/json');
+        echo json_encode(["status" => "error", "msg" => "Failed to write file"]);
+    }
+    exit;
+}
+
+/* ================= READ FILE ================= */
+if (isset($_GET['read_file'])) {
+    $relPath = ltrim($_GET['read_file'], '/\\');
+    if (strpos($relPath, '..') !== false) exit;
+    $file = $baseDir . '/' . $relPath;
+    if (file_exists($file) && is_file($file)) {
+        header('Content-Type: text/plain');
+        echo file_get_contents($file);
+    }
+    exit;
+}
+
 /* ================= FILE LIST (AJAX) ================= */
 if (isset($_GET['ajax_files'])) {
     $folder = $_GET['ajax_files'];
     $files = [];
-    if (is_dir("$baseDir/$folder")) {
-        foreach (array_diff(scandir("$baseDir/$folder"), ['.', '..']) as $f) {
-            $path = "$baseDir/$folder/$f";
-            $files[] = [
-                'name' => $f,
-                'size' => filesize($path),
-                'modified' => filemtime($path),
-                'ext' => strtolower(pathinfo($f, PATHINFO_EXTENSION))
-            ];
+    $targetDir = $folder !== '' ? "$baseDir/$folder" : $baseDir;
+    if (is_dir($targetDir)) {
+        foreach (array_diff(scandir($targetDir), ['.', '..']) as $f) {
+            $path = "$targetDir/$f";
+            if (is_file($path)) {
+                $files[] = [
+                    'name' => $f,
+                    'size' => filesize($path),
+                    'modified' => filemtime($path),
+                    'ext' => strtolower(pathinfo($f, PATHINFO_EXTENSION))
+                ];
+            }
         }
     }
     header('Content-Type: application/json');
@@ -104,7 +141,7 @@ if (isset($_GET['ajax_folders'])) {
     $result = [];
     foreach ($flist as $f) {
         $name = basename($f);
-        $count = count(array_diff(scandir($f), ['.', '..']));
+        $count = count(array_filter(scandir($f), function($x) use ($f) { return $x !== '.' && $x !== '..' && is_file("$f/$x"); }));
         $result[] = ['name' => $name, 'count' => $count];
     }
     header('Content-Type: application/json');
@@ -118,9 +155,11 @@ rsort($folders);
 $folderData = [];
 foreach ($folders as $f) {
     $name = basename($f);
-    $count = count(array_diff(scandir($f), ['.', '..']));
+    $count = count(array_filter(scandir($f), function($x) use ($f) { return $x !== '.' && $x !== '..' && is_file("$f/$x"); }));
     $folderData[] = ['name' => $name, 'count' => $count];
 }
+
+$rootCount = count(array_filter(scandir($baseDir), function($x) use ($baseDir) { return $x !== '.' && $x !== '..' && is_file("$baseDir/$x"); }));
 
 /* ================= MOBILE URL DETECTION ================= */
 $host = $_SERVER['HTTP_HOST'];
@@ -658,6 +697,7 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
         .btn-dl     { background: rgba(16,185,129,.12); color: #6ee7b7; }
         .btn-rename { background: rgba(245,158,11,.12); color: #fcd34d; }
         .btn-del    { background: rgba(239,68,68,.12);  color: #fca5a5; }
+        .btn-edit   { background: rgba(168,85,247,.12); color: #c084fc; } /* Added edit button styles */
 
         .btn:hover { filter: brightness(1.25); transform: scale(1.04); }
 
@@ -778,6 +818,7 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
         .modal-header-icon.rename { background: rgba(245,158,11,.15); }
         .modal-header-icon.delete { background: rgba(239,68,68,.15); }
         .modal-header-icon.preview { background: rgba(99,102,241,.15); }
+        .modal-header-icon.edit { background: rgba(168,85,247,.15); }
 
         .modal-title {
             font-size: 18px; font-weight: 700;
@@ -798,6 +839,27 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
         }
 
         .modal-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+        }
+        
+        .modal-textarea {
+            width: 100%;
+            height: 250px;
+            padding: 12px 16px;
+            background: var(--surface3);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-size: 14px;
+            font-family: monospace;
+            outline: none;
+            resize: vertical;
+            margin-top: 10px;
+            transition: border-color .2s, box-shadow .2s;
+        }
+        
+        .modal-textarea:focus {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(59,130,246,.15);
         }
@@ -841,6 +903,21 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
         /* ── Preview Modal ── */
         #previewModal .modal {
             width: 780px; max-width: 94vw;
+        }
+
+        /* ── Create/Edit Modal ── */
+        #editorModal .modal {
+            width: 96vw;
+            max-width: 1800px;
+            height: 92vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #editorModal .modal-textarea {
+            flex: 1;
+            height: auto;
+            resize: none;
         }
 
         .preview-body {
@@ -956,11 +1033,14 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
             </div>
         </div>
         <div class="header-stats">
+            <button class="scanner-btn" onclick="startCreateFile()">
+                <span>➕ New File</span>
+            </button>
             <button class="scanner-btn" onclick="showScanner()">
                 <span>📱 Connect Phone</span>
             </button>
             <div class="stat">
-                <div class="stat-val" id="totalFolders"><?= count($folderData) ?></div>
+                <div class="stat-val" id="totalFolders"><?= count($folderData) + 1 ?></div>
                 <div class="stat-lbl">Folders</div>
             </div>
             <div class="stat">
@@ -997,8 +1077,16 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
 
         <!-- Folder View -->
         <div id="folderView">
-            <div class="section-label">📁 Date Folders</div>
+            <div class="section-label">📁 Date Folders & Root</div>
             <div class="folder-grid" id="folderGrid">
+                <div class="folder-card" onclick="openFolder('')">
+                    <div class="folder-icon-wrap" style="background: linear-gradient(135deg, rgba(16,185,129,.15), rgba(52,211,153,.15));">🏠</div>
+                    <div class="folder-name">Root Directory</div>
+                    <div class="folder-meta" style="display:flex;align-items:center;">
+                        <?= $rootCount ?> file<?= $rootCount !== 1 ? 's' : '' ?>
+                        <span class="folder-count-badge" style="margin-left:8px; color: #10b981; background: rgba(16,185,129,.15);"><?= $rootCount ?></span>
+                    </div>
+                </div>
                 <?php foreach ($folderData as $fd): ?>
                     <div class="folder-card" onclick="openFolder('<?= htmlspecialchars($fd['name']) ?>')">
                         <div class="folder-icon-wrap">📁</div>
@@ -1009,13 +1097,6 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
                         </div>
                     </div>
                 <?php endforeach; ?>
-                <?php if (empty($folderData)): ?>
-                    <div class="empty-state" style="grid-column:1/-1">
-                        <span class="empty-icon">📭</span>
-                        <h3>No folders yet</h3>
-                        <p>Upload some files to get started</p>
-                    </div>
-                <?php endif; ?>
             </div>
             </div>
             
@@ -1029,6 +1110,7 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
             
                 <div class="toolbar">
                     <a href="#" class="back-btn" onclick="closeFolder();return false">← Back</a>
+                    <button class="back-btn" style="border-color: var(--accent); color: var(--accent);" onclick="startCreateFile()">➕ New File</button>
                     <div class="search-wrap">
                         <span class="search-icon">🔍</span>
                         <input type="text" class="search-input" id="searchInput" placeholder="Search files…">
@@ -1083,6 +1165,22 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
         <div class="modal-btns">
             <button class="modal-btn modal-btn-cancel" onclick="closeModal('deleteModal')">Cancel</button>
             <button class="modal-btn modal-btn-danger" onclick="confirmDelete()">Delete Forever</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Create/Edit Modal ── -->
+<div class="modal-overlay" id="editorModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-header-icon edit">📝</div>
+            <div class="modal-title" id="editorTitle">Edit File</div>
+        </div>
+        <input class="modal-input" id="editorFilename" placeholder="Filename (e.g. script.js)">
+        <textarea class="modal-textarea" id="editorContent" placeholder="Enter file content here..."></textarea>
+        <div class="modal-btns">
+            <button class="modal-btn modal-btn-cancel" onclick="closeModal('editorModal')">Cancel</button>
+            <button class="modal-btn modal-btn-primary" onclick="confirmSaveFile()">Save File</button>
         </div>
     </div>
 </div>
@@ -1175,7 +1273,7 @@ function fileEmojiIcon(ext) {
     if (['xls','xlsx'].includes(ext)) return '📊';
     if (['ppt','pptx'].includes(ext)) return '📊';
     if (['txt','md','log'].includes(ext)) return '📄';
-    if (['js','ts','html','css','php','py','json','xml'].includes(ext)) return '💻';
+    if (['js','ts','html','css','php','py','json','xml','java','dart','c','cpp','h','hpp','cs','go','rs','rb','swift','kt','sh','bat','ps1','yaml','yml','ini','conf'].includes(ext)) return '💻';
     return '📎';
 }
 
@@ -1209,16 +1307,19 @@ function renderFiles(files) {
             ? `<img class="file-thumb" src="uploads/${path}" loading="lazy" alt="${f.name}">`
             : `<div class="file-icon-thumb">${icon}<span class="file-ext-badge">${f.ext||'file'}</span></div>`;
 
+        const editable = ['js','ts','html','css','php','py','json','xml','txt','md','csv','java','dart','c','cpp','h','hpp','cs','go','rs','rb','swift','kt','sh','bat','ps1','yaml','yml','ini','conf'].includes(f.ext);
+
         return `<div class="file-card" data-name="${f.name.toLowerCase()}" data-size="${f.size}" data-date="${f.modified}" style="animation-delay:${i*0.04}s">
             ${thumb}
             <div class="file-body">
                 <div class="file-name" title="${f.name}">${f.name}</div>
                 <div class="file-meta">${formatSize(f.size)} · ${formatDate(f.modified)}</div>
                 <div class="file-actions">
-                    <button class="btn btn-view"   onclick="viewFile('${path}','${f.name}','${f.ext}',${f.size})">👁 View</button>
-                    <button class="btn btn-dl"     onclick="downloadFile('${path}','${f.name}')">↓</button>
-                    <button class="btn btn-rename" onclick="startRename('${path}','${f.name}')">✏</button>
-                    <button class="btn btn-del"    onclick="startDelete('${path}','${f.name}')">🗑</button>
+                    <button class="btn btn-view"   title="View" onclick="viewFile('${path}','${f.name}','${f.ext}',${f.size})">👁</button>
+                    ${editable ? `<button class="btn btn-edit" title="Edit" onclick="startEditFile('${path}','${f.name}')">📝</button>` : ''}
+                    <button class="btn btn-dl"     title="Download" onclick="downloadFile('${path}','${f.name}')">↓</button>
+                    <button class="btn btn-rename" title="Rename" onclick="startRename('${path}','${f.name}')">✏️</button>
+                    <button class="btn btn-del"    title="Delete" onclick="startDelete('${path}','${f.name}')">🗑️</button>
                 </div>
             </div>
         </div>`;
@@ -1348,6 +1449,77 @@ async function confirmDelete() {
         loadFiles();
     } else {
         toast('❌ Delete failed', 'error');
+    }
+}
+
+/* ========================================================
+   CREATE / EDIT
+======================================================== */
+let editorMode = 'create'; // 'create' or 'edit'
+let editorOriginalPath = '';
+
+function startCreateFile() {
+    editorMode = 'create';
+    editorOriginalPath = '';
+    document.getElementById('editorTitle').textContent = 'Create New File';
+    document.getElementById('editorFilename').value = '';
+    document.getElementById('editorFilename').readOnly = false;
+    document.getElementById('editorContent').value = '';
+    openModal('editorModal');
+    setTimeout(() => document.getElementById('editorFilename').focus(), 250);
+}
+
+async function startEditFile(path, name) {
+    editorMode = 'edit';
+    editorOriginalPath = path;
+    document.getElementById('editorTitle').textContent = 'Edit File';
+    document.getElementById('editorFilename').value = name;
+    document.getElementById('editorFilename').readOnly = true;
+    document.getElementById('editorContent').value = 'Loading...';
+    openModal('editorModal');
+    
+    try {
+        const res = await fetch(`?read_file=${encodeURIComponent(path)}`);
+        if (!res.ok) throw new Error('Network response was not ok');
+        const text = await res.text();
+        document.getElementById('editorContent').value = text;
+    } catch(err) {
+        document.getElementById('editorContent').value = '';
+        toast('❌ Failed to read file content', 'error');
+    }
+}
+
+async function confirmSaveFile() {
+    const name = document.getElementById('editorFilename').value.trim();
+    if (!name) return toast('❌ Filename is required', 'error');
+    
+    let targetPath = '';
+    if (editorMode === 'edit') {
+        targetPath = editorOriginalPath;
+    } else {
+        targetPath = (currentFolder ? currentFolder + '/' : '') + name;
+    }
+    
+    const content = document.getElementById('editorContent').value;
+    
+    const body = new URLSearchParams({
+        save_file: targetPath,
+        file_content: content
+    });
+    
+    const res = await fetch('', {method: 'POST', body});
+    const data = await res.json();
+    
+    if (data.status === 'ok') {
+        closeModal('editorModal');
+        toast('✅ File saved successfully', 'success');
+        if (currentFolder !== null) {
+            loadFiles();
+        } else {
+            refreshFolderGrid();
+        }
+    } else {
+        toast('❌ Failed to save file: ' + (data.msg || ''), 'error');
     }
 }
 
