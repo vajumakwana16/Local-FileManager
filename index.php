@@ -77,6 +77,32 @@ if (isset($_POST['rename_old'], $_POST['rename_new'])) {
     exit;
 }
 
+/* ================= CREATE FOLDER ================= */
+if (isset($_POST['create_folder'])) {
+    $folderName = basename($_POST['create_folder']);
+    $folderName = preg_replace('/[^a-zA-Z0-9_\-\s]/', '', $folderName);
+    $folderName = trim($folderName);
+    if ($folderName !== '') {
+        $dir = "$baseDir/$folderName";
+        if (!is_dir($dir)) {
+            if (mkdir($dir, 0777, true)) {
+                header('Content-Type: application/json');
+                echo json_encode(["status" => "ok"]);
+            } else {
+                header('Content-Type: application/json');
+                echo json_encode(["status" => "error", "msg" => "Failed to create directory"]);
+            }
+        } else {
+            header('Content-Type: application/json');
+            echo json_encode(["status" => "error", "msg" => "Folder already exists"]);
+        }
+    } else {
+        header('Content-Type: application/json');
+        echo json_encode(["status" => "error", "msg" => "Invalid folder name"]);
+    }
+    exit;
+}
+
 /* ================= SAVE FILE (CREATE/EDIT) ================= */
 if (isset($_POST['save_file'], $_POST['file_content'])) {
     $relPath = ltrim($_POST['save_file'], '/\\');
@@ -144,8 +170,12 @@ if (isset($_GET['ajax_folders'])) {
         $count = count(array_filter(scandir($f), function($x) use ($f) { return $x !== '.' && $x !== '..' && is_file("$f/$x"); }));
         $result[] = ['name' => $name, 'count' => $count];
     }
+    $rootCount = count(array_filter(scandir($baseDir), function($x) use ($baseDir) { return $x !== '.' && $x !== '..' && is_file("$baseDir/$x"); }));
     header('Content-Type: application/json');
-    echo json_encode($result);
+    echo json_encode([
+        'folders' => $result,
+        'root_count' => $rootCount
+    ]);
     exit;
 }
 
@@ -1010,6 +1040,100 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
             margin-left: auto;
         }
 
+        /* ── Options Dropdown ── */
+        .file-options-wrap {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+        }
+
+        .options-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(13, 21, 37, 0.85);
+            border: 1px solid var(--border);
+            color: var(--text2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .options-btn:hover {
+            background: var(--surface3);
+            color: var(--text);
+            border-color: var(--border2);
+        }
+
+        .options-dropdown {
+            position: absolute;
+            top: 32px;
+            right: 0;
+            background: var(--surface2);
+            border: 1px solid var(--border2);
+            border-radius: var(--radius-sm);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            width: 140px;
+            display: none;
+            flex-direction: column;
+            z-index: 20;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .options-dropdown.show {
+            display: flex;
+        }
+
+        .dropdown-item {
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--text2);
+            background: transparent;
+            border: none;
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+            transition: all 0.15s;
+            width: 100%;
+        }
+
+        .dropdown-item:hover {
+            background: var(--surface3);
+            color: var(--text);
+        }
+
+        .dropdown-item.danger-item {
+            color: #fca5a5;
+        }
+
+        .dropdown-item.danger-item:hover {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+        }
+        
+        .file-card {
+            cursor: pointer;
+        }
+
+        #fileGrid.list-view .file-options-wrap {
+            top: 50%;
+            transform: translateY(-50%);
+            right: 15px;
+        }
+
+        #fileGrid.list-view .file-card {
+            padding-right: 50px;
+        }
+
         /* ── Responsive ── */
         @media (max-width: 640px) {
             .header-stats { display: none; }
@@ -1033,6 +1157,9 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
             </div>
         </div>
         <div class="header-stats">
+            <button class="scanner-btn" onclick="startCreateFolder()">
+                <span>📁 New Folder</span>
+            </button>
             <button class="scanner-btn" onclick="startCreateFile()">
                 <span>➕ New File</span>
             </button>
@@ -1110,6 +1237,7 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
             
                 <div class="toolbar">
                     <a href="#" class="back-btn" onclick="closeFolder();return false">← Back</a>
+                    <button class="back-btn" style="border-color: var(--accent); color: var(--accent);" onclick="startCreateFolder()">📁 New Folder</button>
                     <button class="back-btn" style="border-color: var(--accent); color: var(--accent);" onclick="startCreateFile()">➕ New File</button>
                     <div class="search-wrap">
                         <span class="search-icon">🔍</span>
@@ -1197,6 +1325,21 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
         <div class="modal-btns" style="margin-top:16px">
             <button class="modal-btn modal-btn-cancel" onclick="closeModal('previewModal')">Close</button>
             <button class="modal-btn modal-btn-primary" id="previewDlBtn">↓ Download</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Create Folder Modal ── -->
+<div class="modal-overlay" id="createFolderModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-header-icon rename">📁</div>
+            <div class="modal-title">Create New Folder</div>
+        </div>
+        <input class="modal-input" id="folderNameInput" placeholder="Folder name…">
+        <div class="modal-btns">
+            <button class="modal-btn modal-btn-cancel" onclick="closeModal('createFolderModal')">Cancel</button>
+            <button class="modal-btn modal-btn-primary" onclick="confirmCreateFolder()">Create Folder</button>
         </div>
     </div>
 </div>
@@ -1289,6 +1432,45 @@ function formatDate(ts) {
     return d.toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
 }
 
+function handleFileClick(event, path, name, ext, size) {
+    if (event.target.closest('.file-options-wrap')) {
+        return;
+    }
+    
+    const isImg = imageExts.includes(ext);
+    const isVid = videoExts.includes(ext);
+    const isAud = audioExts.includes(ext);
+    const isPdf = pdfExts.includes(ext);
+    const isEditable = ['js','ts','html','css','php','py','json','xml','txt','md','csv','java','dart','c','cpp','h','hpp','cs','go','rs','rb','swift','kt','sh','bat','ps1','yaml','yml','ini','conf'].includes(ext);
+
+    if (isImg || isVid || isAud || isPdf) {
+        viewFile(path, name, ext, size);
+    } else if (isEditable) {
+        startEditFile(path, name);
+    } else {
+        viewFile(path, name, ext, size);
+    }
+}
+
+function toggleFileOptions(event, btn) {
+    event.stopPropagation();
+    const dropdown = btn.nextElementSibling;
+    const isShowing = dropdown.classList.contains('show');
+    
+    document.querySelectorAll('.options-dropdown.show').forEach(d => {
+        if (d !== dropdown) d.classList.remove('show');
+    });
+    
+    dropdown.classList.toggle('show', !isShowing);
+}
+
+// Close options dropdowns on document click
+document.addEventListener('click', e => {
+    if (!e.target.closest('.file-options-wrap')) {
+        document.querySelectorAll('.options-dropdown.show').forEach(d => d.classList.remove('show'));
+    }
+});
+
 function renderFiles(files) {
     const grid = document.getElementById('fileGrid');
     if (!files.length) {
@@ -1300,7 +1482,7 @@ function renderFiles(files) {
         return;
     }
     grid.innerHTML = files.map((f, i) => {
-        const path = `${currentFolder}/${f.name}`;
+        const path = currentFolder ? currentFolder + '/' + f.name : f.name;
         const icon = fileEmojiIcon(f.ext);
         const isImg = imageExts.includes(f.ext);
         const thumb = isImg
@@ -1309,17 +1491,20 @@ function renderFiles(files) {
 
         const editable = ['js','ts','html','css','php','py','json','xml','txt','md','csv','java','dart','c','cpp','h','hpp','cs','go','rs','rb','swift','kt','sh','bat','ps1','yaml','yml','ini','conf'].includes(f.ext);
 
-        return `<div class="file-card" data-name="${f.name.toLowerCase()}" data-size="${f.size}" data-date="${f.modified}" style="animation-delay:${i*0.04}s">
+        return `<div class="file-card" onclick="handleFileClick(event, '${path}','${f.name}','${f.ext}',${f.size})" data-name="${f.name.toLowerCase()}" data-size="${f.size}" data-date="${f.modified}" style="animation-delay:${i*0.04}s">
             ${thumb}
             <div class="file-body">
                 <div class="file-name" title="${f.name}">${f.name}</div>
                 <div class="file-meta">${formatSize(f.size)} · ${formatDate(f.modified)}</div>
-                <div class="file-actions">
-                    <button class="btn btn-view"   title="View" onclick="viewFile('${path}','${f.name}','${f.ext}',${f.size})">👁</button>
-                    ${editable ? `<button class="btn btn-edit" title="Edit" onclick="startEditFile('${path}','${f.name}')">📝</button>` : ''}
-                    <button class="btn btn-dl"     title="Download" onclick="downloadFile('${path}','${f.name}')">↓</button>
-                    <button class="btn btn-rename" title="Rename" onclick="startRename('${path}','${f.name}')">✏️</button>
-                    <button class="btn btn-del"    title="Delete" onclick="startDelete('${path}','${f.name}')">🗑️</button>
+            </div>
+            <div class="file-options-wrap">
+                <button class="options-btn" onclick="toggleFileOptions(event, this)">⋮</button>
+                <div class="options-dropdown">
+                    <button class="dropdown-item" onclick="event.stopPropagation(); viewFile('${path}','${f.name}','${f.ext}',${f.size})">👁️ View</button>
+                    ${editable ? `<button class="dropdown-item" onclick="event.stopPropagation(); startEditFile('${path}','${f.name}')">📝 Edit</button>` : ''}
+                    <button class="dropdown-item" onclick="event.stopPropagation(); downloadFile('${path}','${f.name}')">📥 Download</button>
+                    <button class="dropdown-item" onclick="event.stopPropagation(); startRename('${path}','${f.name}')">✏️ Rename</button>
+                    <button class="dropdown-item danger-item" onclick="event.stopPropagation(); startDelete('${path}','${f.name}')">🗑️ Delete</button>
                 </div>
             </div>
         </div>`;
@@ -1646,26 +1831,30 @@ function uploadFiles(fileList) {
 async function refreshFolderGrid() {
     const res  = await fetch('?ajax_folders');
     const data = await res.json();
-    renderFolderGrid(data);
+    renderFolderGrid(data.folders, data.root_count);
 
     // Update header counters
-    const totalF = data.length;
-    const totalFi = data.reduce((s, f) => s + f.count, 0);
+    const totalF = data.folders.length + 1;
+    const totalFi = data.folders.reduce((s, f) => s + f.count, 0) + data.root_count;
     document.getElementById('totalFolders').textContent = totalF;
     document.getElementById('totalFiles').textContent   = totalFi;
 }
 
-function renderFolderGrid(folders) {
+function renderFolderGrid(folders, rootCount) {
     const grid = document.getElementById('folderGrid');
-    if (!folders.length) {
-        grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
-            <span class="empty-icon">📭</span>
-            <h3>No folders yet</h3>
-            <p>Upload some files to get started</p>
-        </div>`;
-        return;
-    }
-    grid.innerHTML = folders.map(fd => `
+    
+    const rootHtml = `
+        <div class="folder-card" onclick="openFolder('')">
+            <div class="folder-icon-wrap" style="background: linear-gradient(135deg, rgba(16,185,129,.15), rgba(52,211,153,.15));">🏠</div>
+            <div class="folder-name">Root Directory</div>
+            <div class="folder-meta" style="display:flex;align-items:center;">
+                ${rootCount} file${rootCount !== 1 ? 's' : ''}
+                <span class="folder-count-badge" style="margin-left:8px; color: #10b981; background: rgba(16,185,129,.15);">${rootCount}</span>
+            </div>
+        </div>
+    `;
+    
+    const foldersHtml = folders.map(fd => `
         <div class="folder-card" onclick="openFolder('${escHtml(fd.name)}')">
             <div class="folder-icon-wrap">📁</div>
             <div class="folder-name">${escHtml(fd.name)}</div>
@@ -1674,6 +1863,8 @@ function renderFolderGrid(folders) {
                 <span class="folder-count-badge" style="margin-left:8px">${fd.count}</span>
             </div>
         </div>`).join('');
+        
+    grid.innerHTML = rootHtml + foldersHtml;
 }
 
 function escHtml(str) {
@@ -1688,6 +1879,28 @@ function showScanner() {
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
     document.getElementById('qrImage').src = qrUrl;
     openModal('scannerModal');
+}
+
+function startCreateFolder() {
+    document.getElementById('folderNameInput').value = '';
+    openModal('createFolderModal');
+    setTimeout(() => document.getElementById('folderNameInput').focus(), 250);
+}
+
+async function confirmCreateFolder() {
+    const folderName = document.getElementById('folderNameInput').value.trim();
+    if (!folderName) return toast('❌ Folder name is required', 'error');
+    closeModal('createFolderModal');
+    
+    const body = new URLSearchParams({create_folder: folderName});
+    const res  = await fetch('', {method:'POST', body});
+    const data = await res.json();
+    if (data.status === 'ok') {
+        toast('📁 Folder created successfully', 'success');
+        refreshFolderGrid();
+    } else {
+        toast('❌ Failed to create folder: ' + (data.msg || ''), 'error');
+    }
 }
 
 function openModal(id) {
@@ -1707,6 +1920,12 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
 document.getElementById('renameInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') confirmRename();
     if (e.key === 'Escape') closeModal('renameModal');
+});
+
+// Create folder on Enter
+document.getElementById('folderNameInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmCreateFolder();
+    if (e.key === 'Escape') closeModal('createFolderModal');
 });
 
 /* ========================================================
