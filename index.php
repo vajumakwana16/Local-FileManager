@@ -8,8 +8,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['files'])) {
     @ini_set('upload_max_filesize', '500M');
     @ini_set('post_max_size', '512M');
 
-    $today = date('Y-m-d');
-    $dir = "$baseDir/$today";
+    $parent = isset($_POST['parent_folder']) ? $_POST['parent_folder'] : '';
+    $parent = ltrim($parent, '/\\');
+    if (strpos($parent, '..') !== false) {
+        header('Content-Type: application/json');
+        echo json_encode(["status" => "error", "msg" => "Invalid parent path"]);
+        exit;
+    }
+
+    if ($parent !== '') {
+        $dir = "$baseDir/$parent";
+        $targetFolder = $parent;
+    } else {
+        $today = date('Y-m-d');
+        $dir = "$baseDir/$today";
+        $targetFolder = $today;
+    }
     if (!is_dir($dir)) mkdir($dir, 0777, true);
 
     $uploaded = [];
@@ -46,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['files'])) {
         "status" => empty($errors) ? "ok" : (empty($uploaded) ? "error" : "partial"),
         "files" => $uploaded,
         "errors" => $errors,
-        "folder" => $today,
+        "folder" => $targetFolder,
     ]);
     exit;
 }
@@ -55,12 +69,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['files'])) {
 if (isset($_POST['delete'])) {
     $file = realpath($baseDir . "/" . $_POST['delete']);
     if ($file && strpos($file, realpath($baseDir)) === 0 && file_exists($file)) {
-        unlink($file);
-        header('Content-Type: application/json');
-        echo json_encode(["status" => "ok"]);
+        if (!function_exists('deleteRecursive')) {
+            function deleteRecursive($dir) {
+                if (!is_dir($dir)) {
+                    return unlink($dir);
+                }
+                foreach (scandir($dir) as $item) {
+                    if ($item == '.' || $item == '..') continue;
+                    if (!deleteRecursive($dir . DIRECTORY_SEPARATOR . $item)) return false;
+                }
+                return rmdir($dir);
+            }
+        }
+        if (deleteRecursive($file)) {
+            header('Content-Type: application/json');
+            echo json_encode(["status" => "ok"]);
+        } else {
+            header('Content-Type: application/json');
+            echo json_encode(["status" => "error", "msg" => "Failed to delete"]);
+        }
     } else {
         header('Content-Type: application/json');
-        echo json_encode(["status" => "error"]);
+        echo json_encode(["status" => "error", "msg" => "File not found or invalid path"]);
     }
     exit;
 }
@@ -82,8 +112,22 @@ if (isset($_POST['create_folder'])) {
     $folderName = basename($_POST['create_folder']);
     $folderName = preg_replace('/[^a-zA-Z0-9_\-\s]/', '', $folderName);
     $folderName = trim($folderName);
+    
+    $parent = isset($_POST['parent_folder']) ? $_POST['parent_folder'] : '';
+    $parent = ltrim($parent, '/\\');
+    if (strpos($parent, '..') !== false) {
+        header('Content-Type: application/json');
+        echo json_encode(["status" => "error", "msg" => "Invalid parent path"]);
+        exit;
+    }
+
     if ($folderName !== '') {
-        $dir = "$baseDir/$folderName";
+        $dir = $baseDir;
+        if ($parent !== '') {
+            $dir .= '/' . $parent;
+        }
+        $dir .= '/' . $folderName;
+        
         if (!is_dir($dir)) {
             if (mkdir($dir, 0777, true)) {
                 header('Content-Type: application/json');
@@ -139,18 +183,25 @@ if (isset($_GET['read_file'])) {
 
 /* ================= FILE LIST (AJAX) ================= */
 if (isset($_GET['ajax_files'])) {
-    $folder = $_GET['ajax_files'];
+    $folder = ltrim($_GET['ajax_files'], '/\\');
+    if (strpos($folder, '..') !== false) {
+        header('Content-Type: application/json');
+        echo json_encode([]);
+        exit;
+    }
     $files = [];
     $targetDir = $folder !== '' ? "$baseDir/$folder" : $baseDir;
     if (is_dir($targetDir)) {
         foreach (array_diff(scandir($targetDir), ['.', '..']) as $f) {
             $path = "$targetDir/$f";
-            if (is_file($path)) {
+            $isDir = is_dir($path);
+            if ($isDir || is_file($path)) {
                 $files[] = [
                     'name' => $f,
-                    'size' => filesize($path),
+                    'size' => $isDir ? 0 : filesize($path),
                     'modified' => filemtime($path),
-                    'ext' => strtolower(pathinfo($f, PATHINFO_EXTENSION))
+                    'ext' => $isDir ? '' : strtolower(pathinfo($f, PATHINFO_EXTENSION)),
+                    'is_dir' => $isDir
                 ];
             }
         }
@@ -1134,12 +1185,117 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
             padding-right: 50px;
         }
 
-        /* ── Responsive ── */
+        /* ── Premium Styling Enhancements ── */
+        .folder-card, .file-card {
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s, box-shadow 0.3s !important;
+        }
+        
+        .folder-card:hover {
+            transform: translateY(-5px) !important;
+            box-shadow: 0 16px 36px rgba(59, 130, 246, 0.25) !important;
+            border-color: rgba(59, 130, 246, 0.4) !important;
+        }
+
+        .file-card:hover {
+            transform: translateY(-5px) !important;
+            box-shadow: 0 16px 36px rgba(99, 102, 241, 0.25) !important;
+            border-color: rgba(99, 102, 241, 0.4) !important;
+        }
+
+        .folder-icon-wrap {
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
+        .folder-card:hover .folder-icon-wrap {
+            transform: scale(1.1) rotate(3deg);
+        }
+
+        .file-thumb {
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
+        .file-card:hover .file-thumb {
+            transform: scale(1.06);
+        }
+
+        .modal {
+            background: rgba(13, 21, 37, 0.85) !important;
+            backdrop-filter: blur(20px);
+            border-color: rgba(99, 179, 255, 0.25) !important;
+        }
+
+        /* ── Advanced Responsiveness ── */
+        @media (max-width: 850px) {
+            .toolbar {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+            }
+            .search-wrap {
+                grid-column: span 2;
+                width: 100%;
+            }
+            .sort-select {
+                width: 100%;
+            }
+            .view-toggle {
+                justify-content: center;
+            }
+            .toolbar .back-btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+
         @media (max-width: 640px) {
-            .header-stats { display: none; }
-            .folder-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-            #fileGrid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-            .upload-zone { padding: 30px 20px; }
+            header {
+                flex-direction: column;
+                gap: 18px;
+                text-align: center;
+                align-items: center;
+                padding-bottom: 24px;
+            }
+            .header-stats {
+                width: 100%;
+                justify-content: center;
+                gap: 28px;
+            }
+            .scanner-btn {
+                width: 100%;
+                justify-content: center;
+            }
+            .folder-grid {
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 12px;
+            }
+            #fileGrid {
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 12px;
+            }
+            .upload-zone {
+                padding: 32px 16px;
+            }
+            .upload-icon {
+                font-size: 40px;
+            }
+            .modal {
+                padding: 24px 20px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header-stats {
+                flex-wrap: wrap;
+                justify-content: space-around;
+                gap: 16px;
+            }
+            .toolbar {
+                grid-template-columns: 1fr;
+            }
+            .search-wrap {
+                grid-column: span 1;
+            }
+            .view-toggle {
+                display: none;
+            }
         }
     </style>
 </head>
@@ -1236,7 +1392,7 @@ $mobileScannerUrl = $protocol . "://" . $host . $_SERVER['REQUEST_URI'];
                 </div>
             
                 <div class="toolbar">
-                    <a href="#" class="back-btn" onclick="closeFolder();return false">← Back</a>
+                    <a href="#" class="back-btn" onclick="goBack();return false">← Back</a>
                     <button class="back-btn" style="border-color: var(--accent); color: var(--accent);" onclick="startCreateFolder()">📁 New Folder</button>
                     <button class="back-btn" style="border-color: var(--accent); color: var(--accent);" onclick="startCreateFile()">➕ New File</button>
                     <div class="search-wrap">
@@ -1373,12 +1529,12 @@ let deletePath = '';
 
 /* ========================================================
    FOLDER NAVIGATION
-======================================================== */
+======================================================= */
 function openFolder(name) {
     currentFolder = name;
     document.getElementById('folderView').style.display = 'none';
     document.getElementById('fileView').style.display = 'block';
-    document.getElementById('breadcrumbFolder').textContent = name;
+    renderBreadcrumbs();
     loadFiles();
 }
 
@@ -1391,11 +1547,49 @@ function closeFolder() {
     refreshFolderGrid();
 }
 
+function goBack() {
+    if (!currentFolder) {
+        closeFolder();
+        return;
+    }
+    const parts = currentFolder.split('/');
+    parts.pop();
+    if (parts.length === 0) {
+        closeFolder();
+    } else {
+        openFolder(parts.join('/'));
+    }
+}
+
+function renderBreadcrumbs() {
+    const breadcrumb = document.querySelector('.breadcrumb');
+    if (!currentFolder) {
+        breadcrumb.innerHTML = `<a href="#" onclick="closeFolder();return false">🏠 Home</a> <span class="breadcrumb-sep">›</span> <span class="breadcrumb-cur">Root Directory</span>`;
+        return;
+    }
+    
+    let html = `<a href="#" onclick="closeFolder();return false">🏠 Home</a>`;
+    const parts = currentFolder.split('/');
+    let accumPath = '';
+    
+    parts.forEach((part, index) => {
+        accumPath += (index > 0 ? '/' : '') + part;
+        html += ` <span class="breadcrumb-sep">›</span> `;
+        if (index === parts.length - 1) {
+            html += `<span class="breadcrumb-cur">${part}</span>`;
+        } else {
+            html += `<a href="#" onclick="openFolder('${accumPath.replace(/'/g, "\\'")}');return false">${part}</a>`;
+        }
+    });
+    
+    breadcrumb.innerHTML = html;
+}
+
 async function loadFiles() {
     const res = await fetch(`?ajax_files=${encodeURIComponent(currentFolder)}`);
     allFiles = await res.json();
-    document.getElementById('totalFiles').textContent = allFiles.length;
-    renderFiles(allFiles);
+    document.getElementById('totalFiles').textContent = allFiles.filter(f => !f.is_dir).length;
+    sortFiles();
 }
 
 /* ========================================================
@@ -1483,6 +1677,24 @@ function renderFiles(files) {
     }
     grid.innerHTML = files.map((f, i) => {
         const path = currentFolder ? currentFolder + '/' + f.name : f.name;
+        
+        if (f.is_dir) {
+            return `<div class="file-card folder-card file-card-folder" onclick="if(!event.target.closest('.file-options-wrap')){openFolder('${path.replace(/'/g, "\\'")}');}" data-name="${f.name.toLowerCase()}" data-size="0" data-date="${f.modified}" style="animation-delay:${i*0.04}s">
+                <div class="file-icon-thumb" style="background: linear-gradient(135deg, rgba(59,130,246,.1), rgba(99,102,241,.1));">📁</div>
+                <div class="file-body">
+                    <div class="file-name" title="${f.name}">${f.name}</div>
+                    <div class="file-meta">Folder · ${formatDate(f.modified)}</div>
+                </div>
+                <div class="file-options-wrap">
+                    <button class="options-btn" onclick="toggleFileOptions(event, this)">⋮</button>
+                    <div class="options-dropdown">
+                        <button class="dropdown-item" onclick="event.stopPropagation(); startRename('${path}','${f.name}')">✏️ Rename</button>
+                        <button class="dropdown-item danger-item" onclick="event.stopPropagation(); startDelete('${path}','${f.name}')">🗑️ Delete</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+        
         const icon = fileEmojiIcon(f.ext);
         const isImg = imageExts.includes(f.ext);
         const thumb = isImg
@@ -1524,6 +1736,8 @@ document.getElementById('searchInput').addEventListener('input', function() {
 function sortFiles() {
     const val = document.getElementById('sortSelect').value;
     const sorted = [...allFiles].sort((a, b) => {
+        if (a.is_dir && !b.is_dir) return -1;
+        if (!a.is_dir && b.is_dir) return 1;
         if (val === 'name-asc')  return a.name.localeCompare(b.name);
         if (val === 'name-desc') return b.name.localeCompare(a.name);
         if (val === 'size-asc')  return a.size - b.size;
@@ -1771,6 +1985,9 @@ function uploadFiles(fileList) {
 
     const fd = new FormData();
     [...files].forEach(f => fd.append('files[]', f));
+    if (currentFolder) {
+        fd.append('parent_folder', currentFolder);
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '');
@@ -1892,12 +2109,19 @@ async function confirmCreateFolder() {
     if (!folderName) return toast('❌ Folder name is required', 'error');
     closeModal('createFolderModal');
     
-    const body = new URLSearchParams({create_folder: folderName});
+    const body = new URLSearchParams({
+        create_folder: folderName,
+        parent_folder: currentFolder || ''
+    });
     const res  = await fetch('', {method:'POST', body});
     const data = await res.json();
     if (data.status === 'ok') {
         toast('📁 Folder created successfully', 'success');
-        refreshFolderGrid();
+        if (currentFolder !== null) {
+            loadFiles();
+        } else {
+            refreshFolderGrid();
+        }
     } else {
         toast('❌ Failed to create folder: ' + (data.msg || ''), 'error');
     }
